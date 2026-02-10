@@ -1,8 +1,21 @@
+using System.Text;
 using System.Threading.RateLimiting;
+using Amazon.S3;
+using BasecampSocial.Api.Configuration;
 using BasecampSocial.Api.Data;
+using BasecampSocial.Api.Data.Entities;
+using BasecampSocial.Api.Endpoints;
+using BasecampSocial.Api.Hubs;
 using BasecampSocial.Api.Middleware;
+using BasecampSocial.Api.Services;
+using BasecampSocial.Api.Validators;
+using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using StackExchange.Redis;
 using Serilog;
 
 // ──────────────────────────────────────────────────────────────
@@ -34,6 +47,108 @@ try
     // The connection string comes from appsettings.json → ConnectionStrings:DefaultConnection.
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+    // ── ASP.NET Core Identity ────────────────────────────
+    builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(options =>
+    {
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequiredLength = 8;
+        options.User.RequireUniqueEmail = true;
+    })
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
+
+    // ── JWT Authentication ───────────────────────────────
+    var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()!;
+    builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+    builder.Services.Configure<S3Options>(builder.Configuration.GetSection(S3Options.SectionName));
+    builder.Services.Configure<CorsOptions>(builder.Configuration.GetSection(CorsOptions.SectionName));
+
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtOptions.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(30)
+        };
+
+        // Allow SignalR to receive the JWT via query string
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+    builder.Services.AddAuthorization();
+
+    // ── FluentValidation ─────────────────────────────────
+    builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
+
+    // ── Application Services ─────────────────────────────
+    builder.Services.AddScoped<ITokenService, TokenService>();
+    builder.Services.AddScoped<IAuthService, AuthService>();
+    builder.Services.AddScoped<IUserService, UserService>();
+    builder.Services.AddScoped<IConversationService, ConversationService>();
+    builder.Services.AddScoped<IMessageService, MessageService>();
+    builder.Services.AddScoped<IKeyService, KeyService>();
+    builder.Services.AddScoped<IPollService, PollService>();
+    builder.Services.AddScoped<IUploadService, UploadService>();
+
+    // ── S3 / MinIO Client ────────────────────────────────
+    var s3Config = builder.Configuration.GetSection(S3Options.SectionName).Get<S3Options>()!;
+    builder.Services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client(
+        s3Config.AccessKey,
+        s3Config.SecretKey,
+        new AmazonS3Config
+        {
+            ServiceURL = s3Config.ServiceUrl,
+            ForcePathStyle = s3Config.UsePathStyle
+        }));
+
+    // ── SignalR + Redis Backplane ─────────────────────────
+    var redisConnection = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+    builder.Services.AddSignalR()
+        .AddStackExchangeRedis(redisConnection, options =>
+        {
+            options.Configuration.ChannelPrefix = RedisChannel.Literal("BasecampSocial");
+        });
+
+    // ── CORS ─────────────────────────────────────────────
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+        {
+            var corsOptions = builder.Configuration.GetSection(CorsOptions.SectionName).Get<CorsOptions>();
+            var origins = corsOptions?.AllowedOrigins ?? ["http://localhost:8081"];
+            policy.WithOrigins(origins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        });
+    });
 
     // ── Swagger / OpenAPI ─────────────────────────────────
     // AddOpenApi generates the OpenAPI spec at /openapi/v1.json.
@@ -115,19 +230,16 @@ try
     var app = builder.Build();
 
     // ── Serilog request logging ──────────────────────────────
-    // Logs a single structured event per HTTP request with
-    // method, path, status code, and elapsed ms. Replaces the
-    // noisy default ASP.NET Core request logging (which emits
-    // multiple log events per request).
     app.UseSerilogRequestLogging();
 
     // ── Global error handling ────────────────────────────────
-    // Must be early in the pipeline to catch exceptions from all
-    // downstream middleware and endpoints.
     app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
     // ── Rate limiting ────────────────────────────────────────
     app.UseRateLimiter();
+
+    // ── CORS ─────────────────────────────────────────────────
+    app.UseCors();
 
     // Configure the HTTP request pipeline.
     if (app.Environment.IsDevelopment())
@@ -143,24 +255,21 @@ try
 
     app.UseHttpsRedirection();
 
-    var summaries = new[]
-    {
-        "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-    };
+    // ── Auth middleware ──────────────────────────────────────
+    app.UseAuthentication();
+    app.UseAuthorization();
 
-    app.MapGet("/weatherforecast", () =>
-    {
-        var forecast = Enumerable.Range(1, 5).Select(index =>
-            new WeatherForecast
-            (
-                DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                Random.Shared.Next(-20, 55),
-                summaries[Random.Shared.Next(summaries.Length)]
-            ))
-            .ToArray();
-        return forecast;
-    })
-    .WithName("GetWeatherForecast");
+    // ── Map API Endpoints ────────────────────────────────────
+    app.MapAuthEndpoints();
+    app.MapUserEndpoints();
+    app.MapKeyEndpoints();
+    app.MapConversationEndpoints();
+    app.MapMessageEndpoints();
+    app.MapPollEndpoints();
+    app.MapUploadEndpoints();
+
+    // ── Map SignalR Hub ──────────────────────────────────────
+    app.MapHub<ChatHub>("/hubs/chat");
 
     app.Run();
 }
@@ -173,9 +282,4 @@ finally
     // Ensures all buffered log events are flushed to sinks
     // before the process exits (important for Seq).
     Log.CloseAndFlush();
-}
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
 }
