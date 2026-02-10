@@ -6,6 +6,7 @@ import { View } from 'react-native';
 import RootNavigator from './src/navigation/RootNavigator';
 import { theme } from './src/theme';
 import { useAuthStore } from './src/stores/authStore';
+import { useChatHub } from './src/hooks/useChatHub';
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -15,6 +16,8 @@ export default function App() {
   useEffect(() => {
     restoreSession();
   }, [restoreSession]);
+
+  useChatHub();
 
   if (isLoading) {
     return (

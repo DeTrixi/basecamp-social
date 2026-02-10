@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 // iOS simulator can use localhost; Android emulator needs 10.0.2.2
-const BASE_URL = Platform.select({
+export const BASE_URL = Platform.select({
     android: 'http://10.0.2.2:5297',
     default: 'http://localhost:5297',
 });
