@@ -1,6 +1,8 @@
 using System.Threading.RateLimiting;
+using BasecampSocial.Api.Data;
 using BasecampSocial.Api.Middleware;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 
 // ──────────────────────────────────────────────────────────────
@@ -26,6 +28,12 @@ try
     builder.Host.UseSerilog((context, services, configuration) =>
         configuration.ReadFrom.Configuration(context.Configuration)
                      .ReadFrom.Services(services));
+
+    // ── Database ─────────────────────────────────────────────
+    // Register the AppDbContext with Npgsql (PostgreSQL provider).
+    // The connection string comes from appsettings.json → ConnectionStrings:DefaultConnection.
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
     // ── Swagger / OpenAPI ─────────────────────────────────
     // AddOpenApi generates the OpenAPI spec at /openapi/v1.json.
