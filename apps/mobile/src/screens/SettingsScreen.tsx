@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, List, Switch, Divider } from 'react-native-paper';
-import { useState } from 'react';
+import { useAuthStore } from '../stores/authStore';
 
 export default function SettingsScreen() {
     const [notifications, setNotifications] = useState(true);
+    const logout = useAuthStore((s) => s.logout);
 
     const handleLogout = () => {
-        // TODO: Clear tokens and navigate to auth
+        logout();
     };
 
     return (

@@ -648,3 +648,8 @@ logs/
 !*.pem.example
 certs/
 TODO.md
+
+## =========================
+## Claude Code
+## =========================
+.claude/
