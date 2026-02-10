@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuthStore } from '../stores/authStore';
+import axios from 'axios';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
@@ -14,6 +16,7 @@ export default function RegisterScreen({ navigation }: Props) {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const register = useAuthStore((s) => s.register);
 
     const handleRegister = async () => {
         if (password !== confirmPassword) {
@@ -22,8 +25,25 @@ export default function RegisterScreen({ navigation }: Props) {
         }
         setLoading(true);
         setError('');
-        // TODO: Call auth service
-        setLoading(false);
+        try {
+            await register(username, email, password, displayName);
+            // On success the auth store sets isAuthenticated → RootNavigator switches to Main
+        } catch (err) {
+            if (axios.isAxiosError(err)) {
+                const body = err.response?.data;
+                // ASP.NET Identity validation errors come as { errors: { ... } }
+                if (body?.errors) {
+                    const messages = Object.values(body.errors).flat().join('\n');
+                    setError(messages);
+                } else {
+                    setError(body?.detail ?? body?.title ?? 'Registration failed');
+                }
+            } else {
+                setError('An unexpected error occurred');
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (

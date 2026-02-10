@@ -3,20 +3,32 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuthStore } from '../stores/authStore';
+import axios from 'axios';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
-    const [email, setEmail] = useState('');
+    const [userName, setUserName] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const login = useAuthStore((s) => s.login);
 
     const handleLogin = async () => {
         setLoading(true);
         setError('');
-        // TODO: Call auth service
-        setLoading(false);
+        try {
+            await login(userName, password);
+        } catch (err) {
+            if (axios.isAxiosError(err)) {
+                setError(err.response?.data?.detail ?? err.response?.data?.title ?? 'Login failed');
+            } else {
+                setError('An unexpected error occurred');
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -33,11 +45,10 @@ export default function LoginScreen({ navigation }: Props) {
                 </Text>
 
                 <TextInput
-                    label="Email"
-                    value={email}
-                    onChangeText={setEmail}
+                    label="Username"
+                    value={userName}
+                    onChangeText={setUserName}
                     mode="outlined"
-                    keyboardType="email-address"
                     autoCapitalize="none"
                     style={styles.input}
                 />
@@ -57,7 +68,7 @@ export default function LoginScreen({ navigation }: Props) {
                     mode="contained"
                     onPress={handleLogin}
                     loading={loading}
-                    disabled={loading || !email || !password}
+                    disabled={loading || !userName || !password}
                     style={styles.button}
                 >
                     Sign In
