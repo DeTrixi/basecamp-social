@@ -232,6 +232,13 @@ try
     // ── Serilog request logging ──────────────────────────────
     app.UseSerilogRequestLogging();
 
+    // ── Apply pending migrations ──────────────────────────
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+    }
+
     // ── Global error handling ────────────────────────────────
     app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
@@ -271,7 +278,7 @@ try
     // ── Map SignalR Hub ──────────────────────────────────────
     app.MapHub<ChatHub>("/hubs/chat");
 
-    app.Run();
+    await app.RunAsync();
 }
 catch (Exception ex)
 {
