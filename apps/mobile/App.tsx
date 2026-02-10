@@ -1,20 +1,18 @@
+import 'react-native-get-random-values';
+import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { PaperProvider } from 'react-native-paper';
+import RootNavigator from './src/navigation/RootNavigator';
+import { theme } from './src/theme';
 
 export default function App() {
+  // TODO: Replace with Zustand auth store
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
   return (
-    <View style={styles.container}>
-      <Text>Open ok so this is import ok";</Text>
+    <PaperProvider theme={theme}>
       <StatusBar style="auto" />
-    </View>
+      <RootNavigator isAuthenticated={isAuthenticated} />
+    </PaperProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
