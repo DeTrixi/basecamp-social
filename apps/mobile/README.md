@@ -27,15 +27,20 @@ npx expo start
 Requires Xcode with iOS Simulator installed.
 
 ```bash
-# Start and open in iOS Simulator automatically
-npx expo start --ios
+# Boot iPhone 16 simulator first
+xcrun simctl boot "iPhone 16"
+open -a Simulator
 
-# Or press 'i' after starting the dev server
-npx expo start
-# then press: i
+# Then start Expo — it will use the already-running simulator
+npx expo start --ios
 ```
 
-> **Tip:** Press `Shift + i` to choose a specific simulator device (e.g. iPhone 16 Pro).
+> **Tip:** Press `Shift + i` after starting the dev server to choose a different simulator device.
+>
+> To list all available simulators:
+> ```bash
+> xcrun simctl list devices available | grep -i iphone
+> ```
 
 ### Option 2: Physical iPhone or Android (Expo Go)
 
