@@ -1,3 +1,6 @@
+using System.Threading.RateLimiting;
+using BasecampSocial.Api.Middleware;
+using Microsoft.AspNetCore.RateLimiting;
 using Serilog;
 
 // ──────────────────────────────────────────────────────────────
@@ -64,6 +67,43 @@ try
         });
     });
 
+    // ── Rate Limiting ────────────────────────────────────────
+    // Protects against brute-force attacks and abuse. Uses a
+    // fixed-window strategy per IP address:
+    // - "fixed": general limit (100 requests/minute) for all endpoints
+    // - "auth":  strict limit (10 requests/minute) for auth endpoints
+    //   to prevent credential stuffing attacks.
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+        options.AddFixedWindowLimiter("fixed", limiter =>
+        {
+            limiter.PermitLimit = 100;
+            limiter.Window = TimeSpan.FromMinutes(1);
+            limiter.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+            limiter.QueueLimit = 0;
+        });
+
+        options.AddFixedWindowLimiter("auth", limiter =>
+        {
+            limiter.PermitLimit = 10;
+            limiter.Window = TimeSpan.FromMinutes(1);
+            limiter.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+            limiter.QueueLimit = 0;
+        });
+
+        // Use client IP as the partition key
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 100,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+    });
+
     var app = builder.Build();
 
     // ── Serilog request logging ──────────────────────────────
@@ -72,6 +112,14 @@ try
     // noisy default ASP.NET Core request logging (which emits
     // multiple log events per request).
     app.UseSerilogRequestLogging();
+
+    // ── Global error handling ────────────────────────────────
+    // Must be early in the pipeline to catch exceptions from all
+    // downstream middleware and endpoints.
+    app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
+
+    // ── Rate limiting ────────────────────────────────────────
+    app.UseRateLimiter();
 
     // Configure the HTTP request pipeline.
     if (app.Environment.IsDevelopment())
